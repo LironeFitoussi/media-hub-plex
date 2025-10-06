@@ -70,7 +70,7 @@ io.on("connection", (socket) => {
 app.use(cors({
     origin: (origin, callback) => {
         const allowedOrigins = [
-            process.env.CLIENT_URL || "http://localhost:5173",
+            process.env.CLIENT_URL || "https://localhost:5173",
             "http://localhost:3000", // Local backend
         ];
         
@@ -122,7 +122,7 @@ app.use("/api/downloads", downloadRoutes);
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-httpServer.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
     console.log(`🔌 Server is accessible on LAN at http://192.168.1.64:${PORT}`);
     console.log(`🔌 Socket.io is ready for connections`);

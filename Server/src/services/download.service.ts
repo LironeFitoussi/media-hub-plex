@@ -28,9 +28,16 @@ async function getDownloadToken(fileUrl: string): Promise<OneFichierTokenRespons
         throw new Error("ONEFICHIER_API_KEY is not configured");
     }
 
+    // Clean URL by removing extra parameters (like &af=xxxx)
+    // 1fichier API only needs the base URL with the file ID
+    const cleanUrl = fileUrl.split('&')[0];
+    
+    console.log(`🔗 Original URL: ${fileUrl}`);
+    console.log(`🔗 Clean URL: ${cleanUrl}`);
+
     const response = await axios.post<OneFichierTokenResponse>(
         "https://api.1fichier.com/v1/download/get_token.cgi",
-        { url: fileUrl },
+        { url: cleanUrl },
         {
             headers: {
                 Authorization: `Bearer ${ONEFICHIER_API_KEY}`,
