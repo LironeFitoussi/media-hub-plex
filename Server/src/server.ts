@@ -41,7 +41,7 @@ if (!CLIENT_URL) {
 // Initialize Socket.io
 export const io = new SocketIOServer(httpServer, {
     cors: {
-        origin: CLIENT_URL,
+        origin: true,
         credentials: true,
     },
 });
@@ -66,9 +66,30 @@ io.on("connection", (socket) => {
     });
 });
 
-// Cors
+// Cors - Allow CLIENT_URL, LAN IPs, and ngrok URLs
 app.use(cors({
-    origin: process.env.CLIENT_URL,
+    origin: (origin, callback) => {
+        const allowedOrigins = [
+            process.env.CLIENT_URL || "http://localhost:5173",
+            "http://localhost:3000", // Local backend
+        ];
+        
+        // Allow any ngrok-free.app subdomain
+        const isNgrokUrl = origin && origin.includes('.ngrok-free.app');
+        
+        // Allow any local network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        const isLocalNetwork = origin && (
+            origin.includes('://192.168.') || 
+            origin.includes('://10.') || 
+            origin.includes('://172.')
+        );
+        
+        if (!origin || allowedOrigins.includes(origin) || isNgrokUrl || isLocalNetwork) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
 }));
 
@@ -101,7 +122,8 @@ app.use("/api/downloads", downloadRoutes);
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server is running on port ${PORT}`);
+    console.log(`🔌 Server is accessible on LAN at http://192.168.1.64:${PORT}`);
     console.log(`🔌 Socket.io is ready for connections`);
 });
