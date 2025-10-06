@@ -10,37 +10,73 @@ if (!TMDB_API_KEY) {
 
 /**
  * Cleans and parses filename to extract movie title and year
+ * Simple and effective approach:
+ * 1. Remove file extension
+ * 2. Replace dots with spaces
+ * 3. Find year (4 digits)
+ * 4. Cut everything after the year
+ * 
  * Examples:
- * - "Movie.Name.2023.1080p.BluRay.x264.mkv" -> { title: "Movie Name", year: 2023 }
- * - "The_Movie_Name_(2023)_[1080p].mp4" -> { title: "The Movie Name", year: 2023 }
+ * - "The.Fantastic.Four.First.Steps.2025.REPACK.MULTi.TRUEFRENCH.mkv" 
+ *   -> { title: "The Fantastic Four First Steps", year: 2025 }
+ * - "Movie.Name.2023.1080p.BluRay.x264.mkv" 
+ *   -> { title: "Movie Name", year: 2023 }
  */
 function parseFileName(fileName: string): { title: string; year: number | null } {
-    // Remove file extension
-    let cleaned = fileName.replace(/\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i, "");
+    // Step 1: Remove file extension
+    let cleaned = fileName.replace(/\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|ts)$/i, "");
 
-    // Extract year if present (4 digits between 1900-2099)
-    const yearMatch = cleaned.match(/[\(\[\.]?(19\d{2}|20\d{2})[\)\]\.]?/);
-    const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
-
-    // Remove year from title
-    if (yearMatch) {
-        cleaned = cleaned.replace(yearMatch[0], "");
-    }
-
-    // Remove common quality/format indicators
-    cleaned = cleaned.replace(/\b(1080p|720p|480p|2160p|4K|BluRay|BRRip|WEBRip|WEB-DL|HDRip|DVDRip|x264|x265|HEVC|AAC|DTS|DD5\.1|HDTV)\b/gi, "");
-
-    // Remove brackets and their contents
-    cleaned = cleaned.replace(/\[.*?\]/g, "");
-    cleaned = cleaned.replace(/\(.*?\)/g, "");
-
-    // Replace dots, underscores, and dashes with spaces
+    // Step 2: Replace dots, underscores, and dashes with spaces
     cleaned = cleaned.replace(/[\._\-]+/g, " ");
 
-    // Remove multiple spaces
+    // Step 3: Find year (4 digits between 1900-2099)
+    const yearMatch = cleaned.match(/\b(19\d{2}|20\d{2})\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+
+    // Step 4: If year found, cut everything after it (keep only title)
+    if (yearMatch && yearMatch.index !== undefined) {
+        cleaned = cleaned.substring(0, yearMatch.index).trim();
+    }
+
+    // Clean up multiple spaces and trim
     cleaned = cleaned.replace(/\s+/g, " ").trim();
 
     return { title: cleaned, year };
+}
+
+/**
+ * Determines if the API key is a Bearer token (JWT) or a simple API key
+ */
+function isBearerToken(apiKey: string): boolean {
+    return apiKey.startsWith("eyJ"); // JWT tokens start with eyJ
+}
+
+/**
+ * Gets the appropriate axios config for TMDB API authentication
+ */
+function getTMDBConfig(params: Record<string, any> = {}) {
+    if (!TMDB_API_KEY) {
+        throw new Error("TMDB_API_KEY is not configured");
+    }
+
+    // Check if it's a Bearer token or simple API key
+    if (isBearerToken(TMDB_API_KEY)) {
+        // Use Authorization header for Bearer tokens
+        return {
+            headers: {
+                Authorization: `Bearer ${TMDB_API_KEY}`,
+            },
+            params,
+        };
+    } else {
+        // Use api_key query param for simple API keys
+        return {
+            params: {
+                api_key: TMDB_API_KEY,
+                ...params,
+            },
+        };
+    }
 }
 
 /**
@@ -58,14 +94,14 @@ export async function searchMovie(fileName: string): Promise<MovieMetadata | nul
 
         // Search for the movie
         const searchUrl = `${TMDB_BASE_URL}/search/movie`;
-        const searchResponse = await axios.get<TMDBSearchResponse>(searchUrl, {
-            params: {
-                api_key: TMDB_API_KEY,
+        const searchResponse = await axios.get<TMDBSearchResponse>(
+            searchUrl,
+            getTMDBConfig({
                 query: title,
                 year: year || undefined,
                 include_adult: false,
-            },
-        });
+            })
+        );
 
         if (!searchResponse.data.results || searchResponse.data.results.length === 0) {
             console.log(`❌ No TMDB results found for: "${title}"`);
@@ -77,11 +113,10 @@ export async function searchMovie(fileName: string): Promise<MovieMetadata | nul
 
         // Fetch detailed movie information
         const detailsUrl = `${TMDB_BASE_URL}/movie/${movie.id}`;
-        const detailsResponse = await axios.get<TMDBMovieDetails>(detailsUrl, {
-            params: {
-                api_key: TMDB_API_KEY,
-            },
-        });
+        const detailsResponse = await axios.get<TMDBMovieDetails>(
+            detailsUrl,
+            getTMDBConfig()
+        );
 
         const details = detailsResponse.data;
 

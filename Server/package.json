@@ -16,6 +16,7 @@
     "@types/axios": "^0.9.36",
     "@types/dotenv": "^6.1.1",
     "axios": "^1.12.2",
+    "check-disk-space": "^3.4.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
@@ -25,6 +26,7 @@
     "mongoose": "^8.18.2",
     "morgan": "^1.10.1",
     "npm": "^11.6.1",
+    "socket.io": "^4.8.1",
     "tsx": "^4.20.5",
     "zod": "^4.1.11"
   },

@@ -3,6 +3,7 @@ import DownloadModel from "../models/download.model.js";
 import { createDownloadSchema } from "../zod/downloads.zod.js";
 import { startDownload } from "../services/download.service.js";
 import { AppError } from "../utils/errorHandler.js";
+import { getDiskSpaceInfo } from "../utils/diskSpace.js";
 
 /**
  * POST /api/downloads
@@ -81,6 +82,19 @@ export async function deleteDownload(req: Request, res: Response) {
     return res.status(200).json({
         success: true,
         message: "Download deleted",
+    });
+}
+
+/**
+ * GET /api/downloads/disk-space
+ * Returns disk space information for the downloads directory
+ */
+export async function getDiskSpace(req: Request, res: Response) {
+    const diskInfo = await getDiskSpaceInfo();
+
+    return res.status(200).json({
+        success: true,
+        data: diskInfo,
     });
 }
 

@@ -3,9 +3,11 @@ import fs from "fs";
 import path from "path";
 import DownloadModel from "../models/download.model.js";
 import { searchMovie } from "./tmdb.service.js";
+import { io } from "../server.js";
+import { getDiskSpaceInfo } from "../utils/diskSpace.js";
 
 const ONEFICHIER_API_KEY = process.env.ONEFICHIER_API_KEY;
-const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || "./downloads";
+const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || "e:/Movies";
 
 // Ensure download directory exists
 if (!fs.existsSync(DOWNLOAD_DIR)) {
@@ -92,28 +94,67 @@ async function downloadFile(downloadId: string, downloadUrl: string, suggestedFi
         filePath = path.join(DOWNLOAD_DIR, sanitizedFileName);
         const fileStream = fs.createWriteStream(filePath);
 
-        // Search for movie metadata on TMDB
-        console.log(`🎬 Searching TMDB for movie metadata...`);
-        const movieMetadata = await searchMovie(sanitizedFileName);
-
-        // Update filename and movie metadata in database
+        // Update filename in database immediately
         await DownloadModel.findByIdAndUpdate(downloadId, {
             fileName: sanitizedFileName,
-            movieMetadata: movieMetadata || undefined,
         });
 
         const totalBytes = parseInt(response.headers["content-length"] || "0", 10);
         let downloadedBytes = 0;
-        let lastUpdateProgress = 0;
+        let lastDbUpdateProgress = 0;
+        let lastSocketEmitProgress = -1;
+        let tmdbSearchTriggered = false;
 
         response.data.on("data", async (chunk: Buffer) => {
             downloadedBytes += chunk.length;
 
-            // Update progress every 5% to avoid too many DB writes
+            // Trigger TMDB search after we've downloaded at least 1MB or 5% of the file
+            // This ensures the download is stable and the filename is correct
+            if (!tmdbSearchTriggered && (downloadedBytes > 1024 * 1024 || (totalBytes > 0 && downloadedBytes / totalBytes > 0.05))) {
+                tmdbSearchTriggered = true;
+                console.log(`🎬 Download stable, starting TMDB search for: ${sanitizedFileName}`);
+                
+                // Search for movie metadata on TMDB asynchronously (don't block download)
+                searchMovie(sanitizedFileName)
+                    .then((movieMetadata) => {
+                        if (movieMetadata) {
+                            return DownloadModel.findByIdAndUpdate(downloadId, {
+                                movieMetadata: movieMetadata,
+                            }).then(() => {
+                                console.log(`✅ TMDB metadata found: ${movieMetadata.title} (${movieMetadata.year})`);
+                                // Emit metadata update via Socket.io
+                                io.emit("downloadMetadataUpdate", {
+                                    downloadId,
+                                    movieMetadata,
+                                });
+                            });
+                        } else {
+                            console.log(`⚠️ No TMDB match found for: ${sanitizedFileName}`);
+                        }
+                    })
+                    .catch((error) => {
+                        console.error(`❌ TMDB search/update failed:`, error);
+                    });
+            }
+
+            // Update progress in real-time via Socket.io
             if (totalBytes > 0) {
                 const currentProgress = Math.round((downloadedBytes / totalBytes) * 100);
-                if (currentProgress >= lastUpdateProgress + 5 || currentProgress === 100) {
-                    lastUpdateProgress = currentProgress;
+                
+                // Emit real-time progress every 1% to all connected clients
+                if (currentProgress > lastSocketEmitProgress) {
+                    lastSocketEmitProgress = currentProgress;
+                    io.emit("downloadProgress", {
+                        downloadId,
+                        progress: currentProgress,
+                        downloadedBytes,
+                        totalBytes,
+                    });
+                }
+                
+                // Update DB every 5% to avoid too many DB writes
+                if (currentProgress >= lastDbUpdateProgress + 5 || currentProgress === 100) {
+                    lastDbUpdateProgress = currentProgress;
                     await DownloadModel.findByIdAndUpdate(downloadId, {
                         progress: currentProgress,
                     });
@@ -131,13 +172,27 @@ async function downloadFile(downloadId: string, downloadUrl: string, suggestedFi
         });
 
         // Mark as done
-        await DownloadModel.findByIdAndUpdate(downloadId, {
-            status: "DONE",
-            progress: 100,
-            filePath: filePath,
-        });
+        const completedDownload = await DownloadModel.findByIdAndUpdate(
+            downloadId, 
+            {
+                status: "DONE",
+                progress: 100,
+                filePath: filePath,
+            },
+            { new: true }
+        );
 
         console.log(`✅ Download completed: ${sanitizedFileName}`);
+        
+        // Emit completion event via Socket.io
+        io.emit("downloadComplete", {
+            downloadId,
+            download: completedDownload,
+        });
+        
+        // Update disk space info after download completes
+        const diskInfo = await getDiskSpaceInfo();
+        io.emit("diskSpace", diskInfo);
     } catch (error) {
         // Clean up partial file
         if (filePath && fs.existsSync(filePath)) {
@@ -164,6 +219,12 @@ export async function startDownload(downloadId: string): Promise<void> {
         await download.save();
 
         console.log(`🔄 Starting download: ${download.url}`);
+        
+        // Emit download started event via Socket.io
+        io.emit("downloadStarted", {
+            downloadId,
+            download,
+        });
 
         // Step 1: Get download token from 1fichier
         const tokenResponse = await getDownloadToken(download.url);
@@ -178,8 +239,19 @@ export async function startDownload(downloadId: string): Promise<void> {
         console.error(`❌ Download failed:`, error);
 
         // Update status to ERROR
-        await DownloadModel.findByIdAndUpdate(downloadId, {
-            status: "ERROR",
+        const errorDownload = await DownloadModel.findByIdAndUpdate(
+            downloadId,
+            {
+                status: "ERROR",
+                error: error instanceof Error ? error.message : "Unknown error occurred",
+            },
+            { new: true }
+        );
+        
+        // Emit error event via Socket.io
+        io.emit("downloadError", {
+            downloadId,
+            download: errorDownload,
             error: error instanceof Error ? error.message : "Unknown error occurred",
         });
     }

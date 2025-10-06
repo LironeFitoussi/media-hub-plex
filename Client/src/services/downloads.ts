@@ -1,5 +1,6 @@
 import api from "./api";
 import type { IDownload, CreateDownloadPayload } from "@/types";
+import type { DiskSpaceInfo } from "@/types/diskSpace";
 
 export const getDownloads = async (): Promise<IDownload[]> => {
     const { data } = await api.get("/downloads");
@@ -18,5 +19,10 @@ export const createDownload = async (payload: CreateDownloadPayload): Promise<ID
 
 export const deleteDownload = async (id: string): Promise<void> => {
     await api.delete(`/downloads/${id}`);
+};
+
+export const getDiskSpace = async (): Promise<DiskSpaceInfo> => {
+    const { data } = await api.get("/downloads/disk-space");
+    return data.data;
 };
 
