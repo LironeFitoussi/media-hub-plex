@@ -28,12 +28,20 @@ export default function Header() {
               Home
             </Link>
             {isAuthenticated && (
-              <Link 
-                to="/profile" 
-                className="text-gray-700 hover:text-blue-600 hover:bg-white/40 transition-all duration-300 font-semibold text-sm px-3 py-1 rounded-xl"
-              >
-                Profile
-              </Link>
+              <>
+                <Link 
+                  to="/downloads" 
+                  className="text-gray-700 hover:text-blue-600 hover:bg-white/40 transition-all duration-300 font-semibold text-sm px-3 py-1 rounded-xl"
+                >
+                  Downloads
+                </Link>
+                <Link 
+                  to="/profile" 
+                  className="text-gray-700 hover:text-blue-600 hover:bg-white/40 transition-all duration-300 font-semibold text-sm px-3 py-1 rounded-xl"
+                >
+                  Profile
+                </Link>
+              </>
             )}
           </div>
 
