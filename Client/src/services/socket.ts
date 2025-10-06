@@ -25,6 +25,9 @@ export function getSocket(): Socket {
             reconnectionDelayMax: 5000,
             reconnectionAttempts: Infinity,
             transports: ['websocket', 'polling'], // Try websocket first, fallback to polling
+            extraHeaders: {
+                "ngrok-skip-browser-warning": "true"
+              }
         });
 
         socket.on("connect", () => {
