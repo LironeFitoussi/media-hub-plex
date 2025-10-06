@@ -80,7 +80,71 @@ function getTMDBConfig(params: Record<string, any> = {}) {
 }
 
 /**
+ * Detects if a filename indicates a French movie
+ */
+function isFrenchMovie(fileName: string): boolean {
+    const frenchIndicators = /\b(FRENCH|TRUEFRENCH|VFF|VFQ|MULTI|QUEBEC)\b/i;
+    return frenchIndicators.test(fileName);
+}
+
+/**
+ * Searches TMDB with specific region and language parameters
+ */
+async function searchWithRegion(
+    title: string, 
+    year: number | null, 
+    region?: string, 
+    language?: string
+): Promise<TMDBSearchResponse | null> {
+    try {
+        const searchUrl = `${TMDB_BASE_URL}/search/movie`;
+        const params: Record<string, any> = {
+            query: title,
+            include_adult: false,
+        };
+
+        if (year) params.year = year;
+        if (region) params.region = region;
+        if (language) params.language = language;
+
+        const searchResponse = await axios.get<TMDBSearchResponse>(
+            searchUrl,
+            getTMDBConfig(params)
+        );
+
+        return searchResponse.data;
+    } catch (error) {
+        console.error(`❌ TMDB search error (region: ${region || 'none'}, language: ${language || 'none'}):`, error instanceof Error ? error.message : error);
+        return null;
+    }
+}
+
+/**
+ * Fetches detailed movie information from TMDB
+ */
+async function fetchMovieDetails(movieId: number, language?: string): Promise<TMDBMovieDetails | null> {
+    try {
+        const detailsUrl = `${TMDB_BASE_URL}/movie/${movieId}`;
+        const params: Record<string, any> = {};
+        
+        if (language) params.language = language;
+
+        const detailsResponse = await axios.get<TMDBMovieDetails>(
+            detailsUrl,
+            getTMDBConfig(params)
+        );
+
+        return detailsResponse.data;
+    } catch (error) {
+        console.error(`❌ TMDB details fetch error for movie ${movieId}:`, error instanceof Error ? error.message : error);
+        return null;
+    }
+}
+
+/**
  * Searches TMDB for a movie by title and optional year
+ * Automatically detects French movies and searches with appropriate region/language
+ * Falls back to English search if French search fails
  */
 export async function searchMovie(fileName: string): Promise<MovieMetadata | null> {
     if (!TMDB_API_KEY) {
@@ -89,36 +153,62 @@ export async function searchMovie(fileName: string): Promise<MovieMetadata | nul
 
     try {
         const { title, year } = parseFileName(fileName);
+        const isFrench = isFrenchMovie(fileName);
         
-        console.log(`🔍 Searching TMDB for: "${title}"${year ? ` (${year})` : ""}`);
+        console.log(`🔍 Searching TMDB for: "${title}"${year ? ` (${year})` : ""}${isFrench ? ' [French Movie Detected]' : ''}`);
 
-        // Search for the movie
-        const searchUrl = `${TMDB_BASE_URL}/search/movie`;
-        const searchResponse = await axios.get<TMDBSearchResponse>(
-            searchUrl,
-            getTMDBConfig({
-                query: title,
-                year: year || undefined,
-                include_adult: false,
-            })
-        );
+        let searchResults: TMDBSearchResponse | null = null;
+        let searchStrategy = '';
 
-        if (!searchResponse.data.results || searchResponse.data.results.length === 0) {
-            console.log(`❌ No TMDB results found for: "${title}"`);
+        // Strategy 1: If French movie detected, search with French region/language first
+        if (isFrench) {
+            console.log(`🇫🇷 Trying French region search...`);
+            searchResults = await searchWithRegion(title, year, 'FR', 'fr-FR');
+            searchStrategy = 'French region';
+            
+            // If no results with French, try without language restriction but with FR region
+            if (!searchResults?.results || searchResults.results.length === 0) {
+                console.log(`🔄 Retrying with FR region only...`);
+                searchResults = await searchWithRegion(title, year, 'FR');
+                searchStrategy = 'FR region only';
+            }
+        }
+
+        // Strategy 2: Try default search (English/US) if no results yet
+        if (!searchResults?.results || searchResults.results.length === 0) {
+            console.log(`🔄 Trying default search${isFrench ? ' as fallback' : ''}...`);
+            searchResults = await searchWithRegion(title, year);
+            searchStrategy = 'default';
+        }
+
+        // Strategy 3: If still no results, try without year constraint
+        if ((!searchResults?.results || searchResults.results.length === 0) && year) {
+            console.log(`🔄 Retrying without year constraint...`);
+            if (isFrench) {
+                searchResults = await searchWithRegion(title, null, 'FR');
+                searchStrategy = 'FR region without year';
+            } else {
+                searchResults = await searchWithRegion(title, null);
+                searchStrategy = 'default without year';
+            }
+        }
+
+        if (!searchResults?.results || searchResults.results.length === 0) {
+            console.log(`❌ No TMDB results found for: "${title}" after trying all strategies`);
             return null;
         }
 
         // Get the first (most relevant) result
-        const movie = searchResponse.data.results[0];
+        const movie = searchResults.results[0];
+        console.log(`✅ Found result using ${searchStrategy} strategy: ${movie.title} (${movie.release_date?.split('-')[0]})`);
 
-        // Fetch detailed movie information
-        const detailsUrl = `${TMDB_BASE_URL}/movie/${movie.id}`;
-        const detailsResponse = await axios.get<TMDBMovieDetails>(
-            detailsUrl,
-            getTMDBConfig()
-        );
-
-        const details = detailsResponse.data;
+        // Fetch detailed movie information (prefer French language for French movies)
+        const details = await fetchMovieDetails(movie.id, isFrench ? 'fr-FR' : undefined);
+        
+        if (!details) {
+            console.log(`❌ Failed to fetch movie details for: ${movie.title}`);
+            return null;
+        }
 
         // Extract year from release date
         const releaseYear = details.release_date 
@@ -142,7 +232,7 @@ export async function searchMovie(fileName: string): Promise<MovieMetadata | nul
         console.log(`✅ Found TMDB match: ${metadata.title} (${metadata.year})`);
         return metadata;
     } catch (error) {
-        console.error("❌ TMDB API error:", error);
+        console.error("❌ TMDB API error:", error instanceof Error ? error.message : error);
         return null;
     }
 }
